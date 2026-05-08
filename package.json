@@ -1,0 +1,55 @@
+{
+  "name": "@torinvdb/kanka-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Kanka worldbuilding API",
+  "type": "module",
+  "bin": {
+    "kanka-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "smoke": "node scripts/smoke.mjs",
+    "quickstart": "bash scripts/quickstart.sh",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --max-warnings 0",
+    "check": "npm run typecheck && npm run lint && npm run test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "kanka",
+    "worldbuilding",
+    "rpg"
+  ],
+  "author": "Torin van den Bulk",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "node-html-parser": "^7.1.0",
+    "pino": "^9.0.0",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "eslint": "^10.3.0",
+    "msw": "^2.14.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.5"
+  }
+}

@@ -1,0 +1,74 @@
+name: Integration (live Kanka API)
+
+# Only manual dispatch and a weekly schedule.
+# Deliberately NOT triggered on push or pull_request — fork PRs would not
+# receive the secret from GitHub anyway, but this makes the safety explicit
+# and avoids burning the live API quota on every commit.
+on:
+  workflow_dispatch:
+    inputs:
+      mutate:
+        description: "Run --mutate (creates+updates+deletes a throwaway Note in your campaign)"
+        type: boolean
+        default: false
+      campaign_id:
+        description: "Optional campaign id; defaults to first campaign returned"
+        type: string
+        required: false
+  schedule:
+    # Mondays at 08:00 UTC — catches upstream Kanka API regressions weekly.
+    - cron: "0 8 * * 1"
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: smoke against api.kanka.io
+    runs-on: ubuntu-latest
+    # Don't run in forks — they don't have the KANKA_TOKEN secret.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository_owner == github.event.repository.owner.login }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test (read-only)
+        env:
+          KANKA_TOKEN: ${{ secrets.KANKA_TOKEN }}
+          KANKA_TIER: ${{ vars.KANKA_TIER || 'free' }}
+        run: |
+          if [ -z "${KANKA_TOKEN:-}" ]; then
+            echo "::error::KANKA_TOKEN secret is not set on this repository."
+            echo "Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ -n "${{ inputs.campaign_id }}" ]; then
+            npm run smoke -- "${{ inputs.campaign_id }}"
+          else
+            npm run smoke
+          fi
+
+      - name: Smoke test (--mutate)
+        if: ${{ inputs.mutate }}
+        env:
+          KANKA_TOKEN: ${{ secrets.KANKA_TOKEN }}
+          KANKA_TIER: ${{ vars.KANKA_TIER || 'free' }}
+        run: |
+          if [ -n "${{ inputs.campaign_id }}" ]; then
+            npm run smoke -- "${{ inputs.campaign_id }}" --mutate
+          else
+            npm run smoke -- --mutate
+          fi

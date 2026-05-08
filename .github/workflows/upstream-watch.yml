@@ -1,0 +1,113 @@
+name: Watch Kanka upstream
+
+# Polls owlchester/kanka for new releases and opens a tracking issue here when
+# one appears. Idempotent: re-running won't open duplicate issues for the same tag.
+
+on:
+  schedule:
+    # Mondays at 12:00 UTC — same day as the integration smoke, slightly later.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  check-release:
+    name: check owlchester/kanka latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          payload=$(gh api repos/owlchester/kanka/releases/latest)
+          tag=$(echo "$payload" | jq -r '.tag_name')
+          name=$(echo "$payload" | jq -r '.name // .tag_name')
+          url=$(echo "$payload" | jq -r '.html_url')
+          published=$(echo "$payload" | jq -r '.published_at')
+          # Truncate body to keep the issue readable
+          body=$(echo "$payload" | jq -r '.body // ""' | head -c 4000)
+
+          {
+            echo "tag=$tag"
+            echo "name=$name"
+            echo "url=$url"
+            echo "published=$published"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo 'body<<EOF_BODY'
+            echo "$body"
+            echo 'EOF_BODY'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create upstream-update \
+            --color "0e8a16" \
+            --description "New release detected at owlchester/kanka" \
+            >/dev/null 2>&1 || true
+
+      - name: Open tracking issue if new release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+          NAME: ${{ steps.upstream.outputs.name }}
+          URL: ${{ steps.upstream.outputs.url }}
+          PUBLISHED: ${{ steps.upstream.outputs.published }}
+          BODY: ${{ steps.upstream.outputs.body }}
+        run: |
+          set -euo pipefail
+          title="Upstream Kanka release: $TAG"
+
+          # Idempotency: skip if an issue with this exact title already exists (any state).
+          existing=$(gh issue list \
+            --search "in:title \"$title\"" \
+            --state all \
+            --json number \
+            --jq 'length')
+
+          if [ "$existing" -gt 0 ]; then
+            echo "Already tracking $TAG; skipping."
+            exit 0
+          fi
+
+          issue_body=$(cat <<EOF
+          [owlchester/kanka]($URL) released **$NAME** on $PUBLISHED.
+
+          ## Action items
+          - [ ] Review the release notes for API-affecting changes (new endpoints, field renames, deprecations)
+          - [ ] Update entity schemas if new fields appeared on existing types
+          - [ ] Add to \`ENTITY_TYPES\` if new entity types appeared
+          - [ ] Run the integration smoke test (\`workflow_dispatch\` on \`Integration (live Kanka API)\`) to confirm nothing regressed
+          - [ ] Bump \`README.md\` if the supported feature surface changed
+
+          ---
+
+          ## Release notes (truncated)
+
+          $BODY
+
+          ---
+
+          *This issue was opened automatically by [\`upstream-watch.yml\`](.github/workflows/upstream-watch.yml).*
+          EOF
+          )
+
+          gh issue create \
+            --title "$title" \
+            --label "upstream-update" \
+            --body "$issue_body"
