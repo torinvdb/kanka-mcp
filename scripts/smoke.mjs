@@ -17,8 +17,10 @@
 // flow on first run; subsequent runs reuse the persisted tokens.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 // Transparently load .env from the repo root if present (Node 20.12+).
 try {
@@ -35,6 +37,20 @@ const oauthMode = args.includes("--oauth");
 const argCampaignId = args.find((a) => !a.startsWith("--") && /^\d+$/.test(a));
 const targetCampaignId = argCampaignId ? Number(argCampaignId) : undefined;
 
+// Check whether the server has any credential it can resolve.
+// Mirrors the auth resolution order in src/auth/index.ts (CompositeAuthProvider).
+function hasAnyCredential() {
+  if (process.env.KANKA_TOKEN) return true;
+  const tokenFile =
+    process.env.KANKA_TOKEN_FILE ?? join(homedir(), ".config", "kanka-mcp", "token");
+  if (existsSync(tokenFile)) return true;
+  const oauthFile =
+    process.env.KANKA_OAUTH_TOKEN_FILE ??
+    join(homedir(), ".config", "kanka-mcp", "oauth.json");
+  if (existsSync(oauthFile)) return true;
+  return false;
+}
+
 if (oauthMode) {
   if (!process.env.KANKA_OAUTH_CLIENT_ID || !process.env.KANKA_OAUTH_CLIENT_SECRET) {
     console.error(
@@ -43,8 +59,11 @@ if (oauthMode) {
     console.error("Register an app at https://app.kanka.io/settings/api?clients=1");
     process.exit(2);
   }
-} else if (!process.env.KANKA_TOKEN) {
-  console.error("KANKA_TOKEN env var is required (or pass --oauth).");
+} else if (!hasAnyCredential()) {
+  console.error("No Kanka credential found. Either:");
+  console.error("  • set KANKA_TOKEN in your environment, or");
+  console.error("  • write your token to ~/.config/kanka-mcp/token (run npm run quickstart), or");
+  console.error("  • pass --oauth to use a registered OAuth client.");
   console.error("Get a personal token at https://app.kanka.io/settings/api");
   process.exit(2);
 }
