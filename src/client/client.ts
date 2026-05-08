@@ -21,6 +21,14 @@ export interface EntityRef {
   [key: string]: unknown;
 }
 
+export interface KankaProfile {
+  id: number;
+  name: string;
+  is_subscriber: boolean;
+  rate_limit: number;
+  [key: string]: unknown;
+}
+
 export interface SearchResult {
   id: number;
   entity_id: number;
@@ -45,6 +53,10 @@ export interface ListEntitiesParams {
 
 export class KankaClient {
   constructor(private readonly http: HttpClient) {}
+
+  getProfile(): Promise<KankaSingleResponse<KankaProfile>> {
+    return this.http.request<KankaSingleResponse<KankaProfile>>({ path: "profile" });
+  }
 
   listCampaigns(page = 1): Promise<KankaListResponse<CampaignSummary>> {
     return this.http.request<KankaListResponse<CampaignSummary>>({

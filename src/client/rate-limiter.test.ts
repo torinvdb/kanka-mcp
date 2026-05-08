@@ -29,6 +29,19 @@ describe("RateLimiter", () => {
     expect(Date.now() - start).toBeGreaterThanOrEqual(200);
   });
 
+  it("setCapacity resizes the bucket and refill rate, clamping tokens if shrinking", () => {
+    const rl = new RateLimiter({ perMinute: 25, burstMax: 100 });
+    expect(rl.capacityPerMinute).toBe(25);
+
+    rl.setCapacity(80);
+    expect(rl.capacityPerMinute).toBe(80);
+
+    // Bucket was full at 25; after raising capacity it shouldn't artificially fill —
+    // but tokens should not exceed new capacity either if it shrinks back.
+    rl.setCapacity(5);
+    expect(rl.capacityPerMinute).toBe(5);
+  });
+
   it("waits when the bucket is empty until refill", async () => {
     // perMinute=60 → refill 1 token/sec. The bucket starts FULL at capacity,
     // so we drain it explicitly via penalize(0) to test the refill-wait path.

@@ -16,7 +16,23 @@ export function registerAuthTools(server: McpServer, ctx: ToolContext): void {
     async () =>
       safeRun(async () => {
         const status = await ctx.auth.status();
-        return jsonResult(status);
+        // Trigger /profile detection if we haven't already; await it so the
+        // returned status reflects the user's tier on the first call.
+        let profile = ctx.profile.get();
+        if (!profile && status.authenticated) {
+          profile = await ctx.profile.ensure();
+        }
+        return jsonResult({
+          ...status,
+          profile: profile
+            ? {
+                id: profile.id,
+                name: profile.name,
+                is_subscriber: profile.is_subscriber,
+                rate_limit: profile.rate_limit,
+              }
+            : undefined,
+        });
       }),
   );
 
@@ -37,6 +53,10 @@ export function registerAuthTools(server: McpServer, ctx: ToolContext): void {
           clientId: client_id,
           clientSecret: client_secret,
         });
+        // After fresh login, retry /profile detection so the rate limiter
+        // re-tunes for whichever account just authenticated.
+        ctx.profile.reset();
+        await ctx.profile.ensure().catch(() => undefined);
         return jsonResult(result);
       }),
   );

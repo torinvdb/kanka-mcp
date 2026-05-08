@@ -85,25 +85,21 @@ EOF
       ok "Wrote $TOKEN_FILE (mode 0600)"
     fi
 
-    read -rp "Are you a Kanka Boosted/Premium subscriber? [y/N]: " TIER_ANSWER
-    if [[ "${TIER_ANSWER:-N}" =~ ^[Yy] ]]; then TIER="subscriber"; else TIER="free"; fi
-
     step "Running smoke test"
-    KANKA_TIER="$TIER" npm run smoke
+    npm run smoke
 
     cat <<EOF
 
-${BOLD}MCP client config snippet${RESET} ${DIM}(token resolved automatically from $TOKEN_FILE)${RESET}
+${BOLD}MCP client config snippet${RESET} ${DIM}(token resolved automatically from $TOKEN_FILE; tier auto-detected via /profile on startup)${RESET}
 
   ${DIM}# Claude Desktop — add under "mcpServers":${RESET}
   "kanka": {
     "command": "node",
-    "args": ["$REPO_DIR/dist/index.js"],
-    "env": { "KANKA_TIER": "$TIER" }
+    "args": ["$REPO_DIR/dist/index.js"]
   }
 
   ${DIM}# Claude Code CLI:${RESET}
-  claude mcp add kanka --env KANKA_TIER=$TIER -- node $REPO_DIR/dist/index.js
+  claude mcp add kanka -- node $REPO_DIR/dist/index.js
 
 EOF
     ;;
@@ -136,8 +132,6 @@ EOF
       [ -n "${CLIENT_SECRET:-}" ] || fail "Empty client secret"
       read -rp "Redirect port [53117]: " PORT
       PORT=${PORT:-53117}
-      read -rp "Are you a Kanka Boosted/Premium subscriber? [y/N]: " TIER_ANSWER
-      if [[ "${TIER_ANSWER:-N}" =~ ^[Yy] ]]; then TIER="subscriber"; else TIER="free"; fi
 
       umask 077
       cat > "$ENV_FILE" <<ENVEOF
@@ -146,7 +140,6 @@ EOF
 KANKA_OAUTH_CLIENT_ID=$CLIENT_ID
 KANKA_OAUTH_CLIENT_SECRET=$CLIENT_SECRET
 KANKA_OAUTH_REDIRECT_PORT=$PORT
-KANKA_TIER=$TIER
 ENVEOF
       chmod 600 "$ENV_FILE"
       unset CLIENT_ID CLIENT_SECRET
@@ -155,7 +148,6 @@ ENVEOF
       # shellcheck disable=SC1090
       source "$ENV_FILE"
       PORT="${KANKA_OAUTH_REDIRECT_PORT:-53117}"
-      TIER="${KANKA_TIER:-free}"
     fi
 
     step "Running OAuth login + smoke test"
@@ -164,7 +156,7 @@ ENVEOF
 
     cat <<EOF
 
-${BOLD}MCP client config snippet${RESET} ${DIM}(reads credentials from $ENV_FILE for local; copy values for remote clients)${RESET}
+${BOLD}MCP client config snippet${RESET} ${DIM}(reads credentials from $ENV_FILE for local; copy values for remote clients. Tier auto-detected via /profile.)${RESET}
 
   ${DIM}# Claude Desktop — add under "mcpServers":${RESET}
   "kanka": {
@@ -173,8 +165,7 @@ ${BOLD}MCP client config snippet${RESET} ${DIM}(reads credentials from $ENV_FILE
     "env": {
       "KANKA_OAUTH_CLIENT_ID": "<from .env>",
       "KANKA_OAUTH_CLIENT_SECRET": "<from .env>",
-      "KANKA_OAUTH_REDIRECT_PORT": "$PORT",
-      "KANKA_TIER": "$TIER"
+      "KANKA_OAUTH_REDIRECT_PORT": "$PORT"
     }
   }
 

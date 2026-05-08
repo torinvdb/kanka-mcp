@@ -11,6 +11,8 @@ export interface Config {
   oauthStoragePath: string;
   tier: KankaTier;
   rateLimitPerMin: number;
+  /** True if the user explicitly set KANKA_RATE_LIMIT_PER_MIN. We won't auto-override that. */
+  rateLimitExplicit: boolean;
   oauthClientId: string | undefined;
   oauthClientSecret: string | undefined;
   oauthRedirectPort: number | undefined;
@@ -42,6 +44,7 @@ export function loadConfig(): Config {
       join(homedir(), ".config", "kanka-mcp", "oauth.json"),
     tier,
     rateLimitPerMin: envInt("KANKA_RATE_LIMIT_PER_MIN") ?? defaultRate,
+    rateLimitExplicit: process.env.KANKA_RATE_LIMIT_PER_MIN !== undefined,
     oauthClientId: process.env.KANKA_OAUTH_CLIENT_ID,
     oauthClientSecret: process.env.KANKA_OAUTH_CLIENT_SECRET,
     oauthRedirectPort: envInt("KANKA_OAUTH_REDIRECT_PORT"),

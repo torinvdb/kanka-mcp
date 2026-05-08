@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { TtlCache } from "./services/cache.js";
 import { IdResolver } from "./services/id-resolver.js";
+import { ProfileService } from "./services/profile.js";
 import { registerAllTools } from "./tools/register.js";
 import type { KankaListResponse } from "./types.js";
 
@@ -31,6 +32,14 @@ export function buildServer(): BuildServerResult {
   const client = new KankaClient(http);
   const idResolver = new IdResolver(client);
   const campaignsCache = new TtlCache<string, KankaListResponse<CampaignSummary>>(60_000);
+  const profile = new ProfileService(client, rateLimiter, {
+    rateLimitExplicit: config.rateLimitExplicit,
+  });
+
+  // Fire-and-forget: try to detect tier on startup. Safe to fail silently —
+  // the rate limiter stays on its conservative default if /profile is
+  // unavailable or unauthenticated.
+  void profile.ensure().catch(() => undefined);
 
   const server = new McpServer(
     { name: "kanka-mcp", version: "0.1.0" },
@@ -41,7 +50,7 @@ export function buildServer(): BuildServerResult {
     },
   );
 
-  registerAllTools(server, { auth, client, idResolver, campaignsCache });
+  registerAllTools(server, { auth, client, idResolver, campaignsCache, profile });
 
   return { server };
 }

@@ -6,8 +6,8 @@ export interface RateLimiterOptions {
 
 export class RateLimiter {
   private tokens: number;
-  private readonly capacity: number;
-  private readonly refillPerMs: number;
+  private capacity: number;
+  private refillPerMs: number;
   private lastRefill: number;
   private readonly burstWindowMs: number;
   private readonly burstMax: number;
@@ -53,6 +53,23 @@ export class RateLimiter {
     this.tokens = 0;
     const now = Date.now();
     this.penaltyUntil = Math.max(this.penaltyUntil, now + ms);
+  }
+
+  /**
+   * Resize the bucket capacity. Used after we discover the user's actual tier
+   * via `/profile`. Existing token count is clamped to the new capacity if
+   * it shrinks; if it grows, the new headroom is available immediately.
+   */
+  setCapacity(perMinute: number): void {
+    const next = Math.max(1, perMinute);
+    if (next === this.capacity) return;
+    this.capacity = next;
+    this.refillPerMs = next / 60_000;
+    this.tokens = Math.min(this.tokens, next);
+  }
+
+  get capacityPerMinute(): number {
+    return this.capacity;
   }
 
   private refill(): void {

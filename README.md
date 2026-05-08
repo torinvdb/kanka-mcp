@@ -197,8 +197,8 @@ All configuration is via environment variables.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `KANKA_TOKEN` | one of token *or* OAuth | — | Personal API token (Bearer) |
-| `KANKA_TIER` | no | `free` | `free` or `subscriber`. Sets default rate limit (25 / 80 req/min) |
-| `KANKA_RATE_LIMIT_PER_MIN` | no | derived from `KANKA_TIER` | Override the rate-limit token bucket capacity |
+| `KANKA_TIER` | no | auto-detected | `free` or `subscriber`. Sets the **initial** rate limit before `/profile` auto-detection kicks in. Rarely needed — the server queries `/profile` on startup and resizes the bucket to match the API-reported `rate_limit` (30 free / 90 subscriber). |
+| `KANKA_RATE_LIMIT_PER_MIN` | no | auto-tuned via `/profile` | Hard override on the rate-limit bucket capacity. Setting this disables `/profile`-based auto-tuning so a deliberately conservative value won't be silently raised. |
 | `KANKA_BASE_URL` | no | `https://api.kanka.io/1.0` | Override the API base (for testing) |
 | `KANKA_OAUTH_BASE_URL` | no | `https://app.kanka.io` | Override the OAuth host (for testing) |
 | `KANKA_TOKEN_FILE` | no | `~/.config/kanka-mcp/token` | Fallback token location if `KANKA_TOKEN` is unset |
@@ -398,7 +398,7 @@ Hardening defaults baked into the server:
 
 - **Request timeout** (`KANKA_REQUEST_TIMEOUT_MS`, default 30 s) — every HTTP call to Kanka is wrapped in an `AbortController`; hangs surface as `NETWORK_ERROR` rather than blocking the agent indefinitely.
 - **Response size cap** (`KANKA_MAX_RESPONSE_BYTES`, default 10 MiB) — both the declared `Content-Length` and streamed bytes are checked; oversized responses are rejected before they OOM the process.
-- **Rate limiter** — token bucket with burst guard and exponential backoff on 429.
+- **Rate limiter** — token bucket with burst guard and exponential backoff on 429. On startup the server hits `/profile`, reads the API-reported `rate_limit`, and resizes the bucket automatically (30 rpm free / 90 rpm subscriber). `KANKA_RATE_LIMIT_PER_MIN` overrides and disables auto-tuning.
 - **Token files** — written with `0600` mode under `~/.config/kanka-mcp/` (created `0700`).
 - **OAuth** — Authorization Code + PKCE (S256), 24-byte random `state` compared via `crypto.timingSafeEqual`, loopback callback bound to 127.0.0.1.
 - **Log redaction** — pino is configured to censor `Authorization` headers and any field named `*token*`, `*secret*`, etc., before writing to stderr.
