@@ -20,7 +20,8 @@ The script will:
 3. Ask whether you want to authenticate via **Personal API token** or **OAuth 2.0**
 4. Prompt for the relevant credentials (input is hidden) and persist them with `0600` perms — token to `~/.config/kanka-mcp/token` or OAuth client/secret to `.env` in the repo root
 5. Run the end-to-end smoke test (and the OAuth browser flow if you chose option 2)
-6. Print a ready-to-paste MCP-client config snippet for Claude Desktop / Claude Code
+6. **Optionally build and install the `.mcpb` extension** — if Claude Desktop is detected, the script offers to build the bundle and `open` it directly so Claude Desktop's install dialog launches automatically. Because your credentials are already on disk, you can leave every field blank in the install dialog — the server resolves them from `~/.config/kanka-mcp/` at runtime.
+7. Print ready-to-paste MCP-client config snippets as a manual fallback
 
 Re-running `npm run quickstart` is safe — it'll detect existing credentials and offer to reuse them. Skip the rest of this README unless you want manual control.
 
@@ -154,37 +155,51 @@ Expected output (abridged):
 
 ## Connect to an MCP client
 
-Once the smoke test passes, point any MCP-compatible client at the server.
+### Claude Desktop — install the `.mcpb` extension (easiest)
 
-### Claude Desktop
+Claude Desktop has a native Extensions UI. The repo ships a bundle (`.mcpb` file) you can install in two clicks — no JSON editing, no PATH wiring.
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or the equivalent on your platform:
+**The fastest path:** run `npm run quickstart`. After the smoke test passes, the script offers to build the bundle and (on macOS) `open` it directly — Claude Desktop's install dialog launches automatically, and because your credentials are already saved at `~/.config/kanka-mcp/`, you can leave every field in the dialog blank.
+
+**Manual flow:**
+
+1. Build the bundle: `npm run pack:mcpb` (produces `kanka-mcp-<version>.mcpb` in the repo root). Or download a pre-built release from <https://github.com/torinvdb/kanka-mcp/releases/latest>.
+2. **Double-click the `.mcpb` file** — Claude Desktop is registered as the handler for the `Desktop Extension` UTI on macOS, so this launches the install dialog directly. (Equivalent: `open kanka-mcp-0.1.0.mcpb`.)
+3. *Or* navigate manually: Claude Desktop → **Settings → Extensions → Advanced settings → Install Extension…** → select the file.
+4. In the install dialog: paste your Kanka API token *or leave it blank* if you've already saved one at `~/.config/kanka-mcp/token` (the server resolves it from disk as a fallback). OAuth fields are only needed if you registered an OAuth client.
+5. Click **Install** — Kanka tools appear in your next conversation.
+
+To upgrade later, repeat with the new `.mcpb`. Claude Desktop preserves your saved configuration across reinstalls of the same extension name.
+
+### Claude Code CLI
+
+```bash
+claude mcp add kanka-mcp --env KANKA_TIER=subscriber \
+  -- node /absolute/path/to/kanka-mcp/dist/index.js
+```
+
+(Token resolves automatically from `~/.config/kanka-mcp/token` if you ran `npm run quickstart`.)
+
+### Manual JSON config (Claude Desktop power users, other MCP clients)
+
+If you'd rather edit the config file directly — for example, if you use multiple Kanka accounts and want different config per workspace — edit Claude Desktop's `claude_desktop_config.json`:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
-    "kanka": {
+    "kanka-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/kanka-mcp/dist/index.js"],
-      "env": {
-        "KANKA_TOKEN": "your-token-here",
-        "KANKA_TIER": "subscriber"
-      }
+      "env": { "KANKA_TOKEN": "your-token-here" }
     }
   }
 }
 ```
 
-Restart Claude Desktop. The Kanka tools should appear in the tool picker.
-
-### Claude Code (CLI)
-
-```bash
-claude mcp add kanka \
-  --env KANKA_TOKEN=your-token-here \
-  --env KANKA_TIER=subscriber \
-  -- node /absolute/path/to/kanka-mcp/dist/index.js
-```
+The file may not exist yet on a fresh Claude Desktop install — create it with the snippet above. Restart Claude Desktop to pick up the change.
 
 ### Any other MCP client
 
@@ -341,15 +356,27 @@ Rate limiting is conservative: a token bucket sized to the configured tier with 
 ## Development
 
 ```bash
-npm run dev         # tsx watch mode
-npm run typecheck   # tsc --noEmit
-npm run lint        # eslint (bans `console` to protect stdout / MCP framing)
-npm run test        # vitest run — unit + msw HTTP integration tests
-npm run test:watch  # vitest in watch mode
-npm run check       # typecheck + lint + test (run this before committing)
-npm run build       # compile to dist/
-npm run smoke       # end-to-end smoke against the live Kanka API (requires KANKA_TOKEN)
-npm run smoke -- --mutate   # additionally exercises the CRUD path
+npm run dev             # tsx watch mode
+npm run typecheck       # tsc --noEmit
+npm run lint            # eslint (bans `console` to protect stdout / MCP framing)
+npm run test            # vitest run — unit + msw HTTP integration tests
+npm run test:watch      # vitest in watch mode
+npm run check           # typecheck + lint + test (run this before committing)
+npm run build           # compile to dist/
+npm run smoke           # end-to-end smoke against the live Kanka API
+npm run smoke -- --mutate    # additionally exercises CRUD
+npm run smoke -- --oauth     # exercises the OAuth flow
+npm run validate:mcpb   # validate manifest.json against the MCPB schema
+npm run pack:mcpb       # build kanka-mcp-<version>.mcpb for Claude Desktop
+```
+
+### Releasing
+
+Push a `vX.Y.Z` tag to trigger [.github/workflows/release.yml](.github/workflows/release.yml). The workflow runs the full check pipeline, builds the `.mcpb`, and attaches it to a GitHub Release with install instructions. Users download from the Releases tab.
+
+```bash
+npm version patch  # bumps package.json + creates a git tag
+git push --follow-tags
 ```
 
 ### Test layout
@@ -408,8 +435,11 @@ Hardening defaults baked into the server:
 Run `npm audit` locally any time:
 
 ```bash
-npm audit
+npm audit                    # all deps (may show low-severity dev-only items)
+npm audit --omit=dev         # production deps only — should always be 0
 ```
+
+> **Note:** `npm audit` (without flags) currently surfaces a few **low-severity** advisories from dev tooling (`@anthropic-ai/mcpb` → `@inquirer/prompts` → `tmp`). These are interactive-CLI components used only when packing the extension bundle locally; they never run at server runtime and aren't shipped in the `.mcpb`. Production deps remain at zero advisories — see CI for the authoritative gate.
 
 ## License
 

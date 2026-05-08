@@ -1,0 +1,106 @@
+name: Release
+
+# When a vX.Y.Z tag is pushed, build the .mcpb bundle and attach it to a
+# GitHub Release. Users install the bundle through Claude Desktop's
+# Extensions UI without ever cloning the repo.
+#
+# IMPORTANT: this workflow deliberately does NOT reference secrets.KANKA_TOKEN
+# or any other Kanka credential. The .mcpb is built with placeholders only
+# (${user_config.kanka_token}) which Claude Desktop substitutes locally on
+# each user's machine at install time. The bundle contains zero credentials.
+# scripts/pack-mcpb.sh additionally scans the produced archive and aborts if
+# any known secret value from the environment ends up baked in.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re-)build a release for"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build .mcpb and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify check pipeline still passes
+        run: npm run check
+
+      - name: Build .mcpb
+        run: npm run pack:mcpb
+
+      - name: Compute artifact metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="${{ inputs.tag || github.ref_name }}"
+          file="kanka-mcp-${version}.mcpb"
+          sha=$(shasum -a 256 "$file" | awk '{print $1}')
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "file=$file"
+            echo "sha256=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.meta.outputs.tag }}"
+          file="${{ steps.meta.outputs.file }}"
+          sha="${{ steps.meta.outputs.sha256 }}"
+
+          notes=$(cat <<EOF
+          Claude Desktop extension for the Kanka API.
+
+          ## Install
+
+          1. Download \`$file\` below
+          2. Open Claude Desktop → **Settings → Extensions → Advanced settings → Install Extension…**
+          3. Select the file. Paste your Kanka Personal API token when prompted (or leave blank if using OAuth).
+
+          ## Verify
+
+          \`\`\`
+          shasum -a 256 $file
+          # → $sha
+          \`\`\`
+
+          See [README](https://github.com/${{ github.repository }}#readme) for full docs and the manual install path.
+          EOF
+          )
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$file" --clobber
+          else
+            gh release create "$tag" "$file" \
+              --title "$tag" \
+              --notes "$notes"
+          fi

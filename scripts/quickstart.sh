@@ -93,13 +93,13 @@ EOF
 ${BOLD}MCP client config snippet${RESET} ${DIM}(token resolved automatically from $TOKEN_FILE; tier auto-detected via /profile on startup)${RESET}
 
   ${DIM}# Claude Desktop — add under "mcpServers":${RESET}
-  "kanka": {
+  "kanka-mcp": {
     "command": "node",
     "args": ["$REPO_DIR/dist/index.js"]
   }
 
   ${DIM}# Claude Code CLI:${RESET}
-  claude mcp add kanka -- node $REPO_DIR/dist/index.js
+  claude mcp add kanka-mcp -- node $REPO_DIR/dist/index.js
 
 EOF
     ;;
@@ -159,7 +159,7 @@ ENVEOF
 ${BOLD}MCP client config snippet${RESET} ${DIM}(reads credentials from $ENV_FILE for local; copy values for remote clients. Tier auto-detected via /profile.)${RESET}
 
   ${DIM}# Claude Desktop — add under "mcpServers":${RESET}
-  "kanka": {
+  "kanka-mcp": {
     "command": "node",
     "args": ["$REPO_DIR/dist/index.js"],
     "env": {
@@ -177,12 +177,76 @@ EOF
     ;;
 esac
 
+# ─── Optional: build & install Claude Desktop extension bundle ─────────────
+EXT_DIR_DARWIN="$HOME/Library/Application Support/Claude/Claude Extensions"
+EXT_DIR_WIN="${APPDATA:-}/Claude/Claude Extensions"
+
+CLAUDE_DESKTOP_DETECTED=false
+if [[ "$(uname)" == "Darwin" ]] && [ -d "$EXT_DIR_DARWIN" ]; then
+  CLAUDE_DESKTOP_DETECTED=true
+elif [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]] && [ -n "${APPDATA:-}" ] && [ -d "$EXT_DIR_WIN" ]; then
+  CLAUDE_DESKTOP_DETECTED=true
+fi
+
+step "Optional: build the Claude Desktop extension bundle"
+if [ "$CLAUDE_DESKTOP_DETECTED" = true ]; then
+  ok "Detected Claude Desktop on this machine"
+fi
+
+cat <<EOF
+
+The .mcpb bundle is the smoothest install path for Claude Desktop —
+two clicks instead of editing JSON. Because the credentials you saved a
+moment ago live at ~/.config/kanka-mcp/, ${BOLD}you can leave every field blank
+in Claude Desktop's install dialog${RESET} — the server reads them from disk
+automatically.
+
+EOF
+
+read -rp "Build kanka-mcp.mcpb now? [Y/n]: " BUILD_BUNDLE
+if [[ "${BUILD_BUNDLE:-Y}" =~ ^[Yy] ]]; then
+  npm run pack:mcpb
+
+  VERSION=$(node -p "require('./package.json').version")
+  BUNDLE="$REPO_DIR/kanka-mcp-${VERSION}.mcpb"
+
+  if [ ! -f "$BUNDLE" ]; then
+    fail "Bundle build did not produce $BUNDLE"
+  fi
+  ok "Bundle ready: $BUNDLE"
+
+  if [[ "$(uname)" == "Darwin" ]] && [ "$CLAUDE_DESKTOP_DETECTED" = true ]; then
+    echo ""
+    read -rp "Open it now? Claude Desktop will start the install dialog. [Y/n]: " OPEN_NOW
+    if [[ "${OPEN_NOW:-Y}" =~ ^[Yy] ]]; then
+      open "$BUNDLE"
+      ok "Claude Desktop should now be showing the install dialog."
+      echo "  Tip: leave the token / OAuth fields blank — your saved credentials will be used."
+    else
+      echo ""
+      echo "When you're ready: double-click $BUNDLE,"
+      echo "or in Claude Desktop go to Settings → Extensions → Advanced settings → Install Extension…"
+    fi
+  else
+    cat <<EOF
+
+To install the bundle in Claude Desktop:
+  1. Open Claude Desktop
+  2. Settings → Extensions → Advanced settings → Install Extension…
+  3. Select $BUNDLE
+  4. Leave the credential fields blank (your saved files will be used)
+
+EOF
+  fi
+fi
+
 cat <<EOF
 
 ${GREEN}${BOLD}✓ Setup complete.${RESET}
 
   ${BOLD}Re-run smoke:${RESET}     npm run smoke
   ${BOLD}With CRUD test:${RESET}   npm run smoke -- --mutate
+  ${BOLD}Rebuild bundle:${RESET}   npm run pack:mcpb
   ${BOLD}Logout (OAuth):${RESET}   delete ~/.config/kanka-mcp/oauth.json
   ${BOLD}Reset all:${RESET}        delete .env and ~/.config/kanka-mcp/
 

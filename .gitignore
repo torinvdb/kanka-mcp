@@ -7,3 +7,6 @@ dist/
 coverage/
 .vscode/
 .idea/
+
+# Built MCP bundle artifacts (ship via GitHub Releases, not committed)
+*.mcpb

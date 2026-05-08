@@ -1,0 +1,40 @@
+# Source — only the compiled dist/ ships in the bundle
+src/
+tsconfig.json
+vitest.config.ts
+eslint.config.js
+
+# Tests + dev tooling
+**/*.test.ts
+**/*.test.js
+**/*.test.d.ts
+
+# Scripts not needed at runtime
+scripts/
+
+# Local credentials & state (must never end up in a public bundle)
+.env
+.env.*
+**/.config/
+
+# Source maps blow up bundle size; users don't need them
+**/*.map
+
+# Repo metadata
+.git/
+.github/
+.claude/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+
+# Bundle output
+*.mcpb
+
+# Editor / OS
+.DS_Store
+node_modules/.cache/
+
+# Docs that aren't useful inside the bundle
+SECURITY.md

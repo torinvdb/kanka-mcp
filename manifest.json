@@ -1,0 +1,104 @@
+{
+  "manifest_version": "0.3",
+  "name": "kanka-mcp",
+  "display_name": "Kanka",
+  "version": "0.1.0",
+  "description": "Manage Kanka campaigns, characters, locations, posts, relations, and full-text search from any MCP client.",
+  "long_description": "MCP server for the Kanka worldbuilding API. 15 tools spanning auth, campaigns, search (native name + client-side full-text), and full CRUD on all 18 entity types. Includes a token-bucket rate limiter that auto-tunes from /profile, OAuth 2.0 + PKCE with refresh, structured 422 validation errors, and dual-ID resolution.",
+  "author": {
+    "name": "Torin van den Bulk",
+    "url": "https://github.com/torinvdb"
+  },
+  "homepage": "https://github.com/torinvdb/kanka-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/torinvdb/kanka-mcp"
+  },
+  "license": "MIT",
+  "keywords": ["kanka", "worldbuilding", "ttrpg", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "KANKA_TOKEN": "${user_config.kanka_token}",
+        "KANKA_OAUTH_CLIENT_ID": "${user_config.oauth_client_id}",
+        "KANKA_OAUTH_CLIENT_SECRET": "${user_config.oauth_client_secret}",
+        "KANKA_OAUTH_REDIRECT_PORT": "${user_config.oauth_redirect_port}",
+        "KANKA_RATE_LIMIT_PER_MIN": "${user_config.rate_limit_override}",
+        "KANKA_LOG_LEVEL": "${user_config.log_level}"
+      }
+    }
+  },
+  "user_config": {
+    "kanka_token": {
+      "type": "string",
+      "title": "Personal API Token (recommended)",
+      "description": "Get one at https://app.kanka.io/settings/api. Leave blank if you intend to use OAuth instead.",
+      "required": false,
+      "sensitive": true
+    },
+    "oauth_client_id": {
+      "type": "string",
+      "title": "OAuth Client ID (advanced, optional)",
+      "description": "If using OAuth: register a client at https://app.kanka.io/settings/api?clients=1 with redirect URI http://localhost:53117/cb. Then call kanka_oauth_login from your MCP client.",
+      "required": false,
+      "sensitive": false
+    },
+    "oauth_client_secret": {
+      "type": "string",
+      "title": "OAuth Client Secret (advanced, optional)",
+      "description": "Pairs with the OAuth Client ID above. Leave blank if using a Personal Token.",
+      "required": false,
+      "sensitive": true
+    },
+    "oauth_redirect_port": {
+      "type": "string",
+      "title": "OAuth Redirect Port (advanced, optional)",
+      "description": "Defaults to 53117. Must match the port in your registered redirect URI.",
+      "required": false,
+      "sensitive": false,
+      "default": "53117"
+    },
+    "rate_limit_override": {
+      "type": "string",
+      "title": "Rate Limit Override (rpm, advanced, optional)",
+      "description": "Override the auto-tuned rate limit. Leave blank to let the server detect free/subscriber via /profile (30/90 rpm).",
+      "required": false,
+      "sensitive": false
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log Level (optional)",
+      "description": "trace, debug, info, warn, error, or fatal. Defaults to info.",
+      "required": false,
+      "sensitive": false,
+      "default": "info"
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "tools": [
+    { "name": "kanka_auth_status", "description": "Check whether a Kanka credential is configured" },
+    { "name": "kanka_oauth_login", "description": "Run OAuth Authorization Code + PKCE login" },
+    { "name": "kanka_auth_logout", "description": "Clear stored OAuth tokens" },
+    { "name": "kanka_list_campaigns", "description": "Discover campaigns the user can access" },
+    { "name": "kanka_get_campaign", "description": "Fetch metadata for one campaign" },
+    { "name": "kanka_describe_entity_type", "description": "Return JSON Schema for an entity type" },
+    { "name": "kanka_search", "description": "Native name search within a campaign" },
+    { "name": "kanka_full_text_search", "description": "Client-side full-text search over entry HTML" },
+    { "name": "kanka_list_entities", "description": "Paginated list with incremental sync support" },
+    { "name": "kanka_get_entity", "description": "Fetch by id or entity_id (dual-ID resolved)" },
+    { "name": "kanka_create_entity", "description": "Create an entity of any supported type" },
+    { "name": "kanka_update_entity", "description": "Partial PATCH on an existing entity" },
+    { "name": "kanka_delete_entity", "description": "Delete an entity (requires confirm)" },
+    { "name": "kanka_posts", "description": "CRUD on posts attached to an entity" },
+    { "name": "kanka_relations", "description": "CRUD on relations between entities" }
+  ]
+}
