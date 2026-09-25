@@ -14,6 +14,7 @@ import {
 import type { ToolContext } from "./context.js";
 import { jsonResult, safeRun } from "./result.js";
 import { fieldsInput, responseInput, slimEntity, type ResponseMode } from "./slim.js";
+import { applyEntryEdits } from "../services/entry-edits.js";
 
 const entityTypeInput = z
   .enum(ENTITY_TYPE_INPUTS)
@@ -28,6 +29,16 @@ function canonicalType(input: EntityTypeInput): EntityType {
 function shape(record: unknown, type: EntityType | undefined, mode: ResponseMode | undefined, fields?: string[]): unknown {
   return mode === "slim" ? slimEntity(record, type, fields) : record;
 }
+
+const ENTRY_EDITS_DOC =
+  "\n\nEntry edits: instead of sending the whole `entry` in `data`, pass `entry_edits`, a list of `{before, after}` pairs. The server reads the live record, applies the edits in order, and PATCHes the result with the rest of `data`. Each `before` must occur exactly once in the text as it stands when that edit runs, and the U+00A0 count must change by exactly `nbsp_delta` (default 0); otherwise the call fails with EDIT_REFUSED and nothing is written. Pass `expect_updated_at` (the `updated_at` of your own read) to fail with CONFLICT if the page changed since. `dry_run: true` runs every check and writes nothing. Anchors and replacements are literal text. The response defaults to slim and never echoes the entry. Do not put `entry` in `data` together with `entry_edits`.";
+
+const entryEditsInput = z
+  .array(z.object({ before: z.string().min(1), after: z.string() }))
+  .min(1)
+  .max(200)
+  .optional()
+  .describe("Anchored edits applied server-side to the live entry. See the tool description.");
 
 const SLIM_DOC =
   "\n\nResponse size: pass `response: \"slim\"` to get back only id, entity_id, name, type, is_private, updated_at and (for tree types) parent_id, without `entry`, `entry_parsed` or image URLs. Add `fields` to copy extra keys, e.g. `fields: [\"entry\"]`. The default `full` returns the whole record.";
@@ -197,22 +208,72 @@ export function registerEntityTools(server: McpServer, ctx: ToolContext): void {
       title: "Update entity",
       description:
         "Partial update (PATCH) on an existing entity. Provide only the fields you want to change. The `id` is the type-scoped id (e.g. character id), not entity_id. To clear a parent or status send null: `{\"parent_id\": null}` or `{\"status_id\": null}`. Keys the type's schema does not declare are not sent; the response lists them in `ignored_fields` (see kanka_describe_entity_type)." +
+        ENTRY_EDITS_DOC +
         SLIM_DOC,
       inputSchema: {
         campaign_id: z.number().int().positive(),
         entity_type: entityTypeInput,
         id: z.number().int().positive(),
         data: z.record(z.string(), z.unknown()),
+        entry_edits: entryEditsInput,
+        nbsp_delta: z.number().int().optional().describe("Allowed change in the U+00A0 count under entry_edits. Default 0."),
+        expect_updated_at: z
+          .string()
+          .optional()
+          .describe("Under entry_edits: the updated_at of your own read. A different live value fails with CONFLICT."),
+        dry_run: z.boolean().optional().describe("Under entry_edits: run every check against the live entry, write nothing."),
         response: responseInput,
         fields: fieldsInput,
       },
     },
-    async ({ campaign_id, entity_type: entityTypeArg, id, data, response: mode, fields }) =>
+    async ({
+      campaign_id,
+      entity_type: entityTypeArg,
+      id,
+      data,
+      entry_edits,
+      nbsp_delta,
+      expect_updated_at,
+      dry_run,
+      response: mode,
+      fields,
+    }) =>
       safeRun(async () => {
         const entity_type = canonicalType(entityTypeArg);
         const schema = getUpdateSchema(entity_type);
+        if (entry_edits && Object.prototype.hasOwnProperty.call(data, "entry")) {
+          throw new KankaError("VALIDATION_ERROR", "Send either `entry` in `data` or `entry_edits`, not both");
+        }
         const validated = validateOrThrow(schema, data);
         const ignored = unknownKeys(schema, data);
+        let editSummary: Record<string, unknown> | undefined;
+        if (entry_edits) {
+          const live = (await ctx.client.getTypedEntity(campaign_id, entity_type, id)).data as {
+            entry?: string | null;
+            updated_at?: string;
+          };
+          if (expect_updated_at !== undefined && live.updated_at !== expect_updated_at) {
+            throw new KankaError("CONFLICT", "The live record changed since your read; nothing was written", {
+              details: { expected: expect_updated_at, live: live.updated_at },
+            });
+          }
+          const result = applyEntryEdits(live.entry ?? "", entry_edits, nbsp_delta ?? 0);
+          editSummary = {
+            applied: result.applied,
+            changed: result.changed,
+            nbsp: result.nbsp,
+            length: result.length,
+            live_updated_at: live.updated_at,
+          };
+          const slimLive = shape(live, entity_type, "slim", fields);
+          if (dry_run) {
+            return jsonResult({ type: entity_type, dry_run: true, entry_edits: editSummary, data: slimLive });
+          }
+          if (!result.changed && Object.keys(validated).length === 0) {
+            return jsonResult({ type: entity_type, unchanged: true, entry_edits: editSummary, data: slimLive });
+          }
+          validated.entry = result.text;
+        }
         const response = await ctx.client.updateEntity(campaign_id, entity_type, id, validated);
         const updated = response.data as { id?: number; entity_id?: number; name?: string };
         if (typeof updated.entity_id === "number") {
@@ -226,7 +287,8 @@ export function registerEntityTools(server: McpServer, ctx: ToolContext): void {
         }
         return jsonResult({
           type: entity_type,
-          data: shape(response.data, entity_type, mode, fields),
+          data: shape(response.data, entity_type, entry_edits ? (mode ?? "slim") : mode, fields),
+          ...(editSummary ? { entry_edits: editSummary } : {}),
           ...(ignored.length > 0 ? { ignored_fields: ignored } : {}),
         });
       }),

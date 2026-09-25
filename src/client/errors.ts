@@ -8,6 +8,10 @@ export type KankaErrorCode =
   | "NETWORK_ERROR"
   /** A local policy check (upload allowlist, file type, size, overwrite guard) refused the call. */
   | "UPLOAD_REFUSED"
+  /** An entry edit did not apply cleanly to the live text (anchor count, U+00A0 count). Nothing was written. */
+  | "EDIT_REFUSED"
+  /** The live record changed since the caller's read (`expect_updated_at`). Nothing was written. */
+  | "CONFLICT"
   | "UNKNOWN";
 
 export class KankaError extends Error {

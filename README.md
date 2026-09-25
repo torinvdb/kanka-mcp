@@ -285,7 +285,7 @@ Tokens are stored as a JSON file with restrictive permissions; we deliberately a
 | `kanka_list_entities` | Paginated list of entities, optionally filtered by type and arbitrary query filters |
 | `kanka_get_entity` | Fetch a single entity by type-scoped `id` OR global `entity_id` (resolves the dual-ID system transparently) |
 | `kanka_create_entity` | Create an entity. `data` is validated client-side against the per-type Zod schema before sending |
-| `kanka_update_entity` | Partial PATCH on an existing entity |
+| `kanka_update_entity` | Partial PATCH on an existing entity; `entry_edits` applies anchored edits to the live entry on the server |
 | `kanka_delete_entity` | Permanently delete an entity. Requires `confirm: true` |
 
 **Sub-resources** — both follow a unified `action: list | get | create | update | delete` shape. They hang off the **global `entity_id`**, never the type-scoped id.
@@ -400,6 +400,34 @@ A slim entity carries `id`, `entity_id`, `name`, `type` (the free-text Type fiel
 // Read the raw entry for editing, without entry_parsed or image URLs
 { "tool": "kanka_get_entity", "args": {
     "campaign_id": 126725, "entity_id": 3100560, "response": "slim", "fields": ["entry"] } }
+```
+
+### Entry edits
+
+Rewriting a long page to change one sentence costs the whole entry twice: once to read it, once to send it back. `kanka_update_entity` also takes `entry_edits`, a list of `{before, after}` pairs, and applies them on the server to a fresh read of the live record:
+
+- Each `before` must occur exactly once in the text as it stands when that edit runs. Edits apply in order.
+- The U+00A0 (non-breaking space) count must change by exactly `nbsp_delta`, default 0.
+- `expect_updated_at`, the `updated_at` from your own read, fails the call with `CONFLICT` if the page changed since.
+- `dry_run: true` runs every check and writes nothing.
+- A failed check returns `EDIT_REFUSED` or `CONFLICT` with the reason in `details`, and nothing is written. Edits that leave the entry as it was skip the PATCH and return `unchanged: true`.
+- Anchors and replacements are literal text: no regex, no `$`-patterns.
+- The response defaults to slim and never echoes the entry. It adds an `entry_edits` summary: edits applied, whether the text changed, U+00A0 and length before and after, and the live `updated_at` the edits ran against.
+
+Other keys in `data` (name, type, parent) go in the same PATCH. `entry` in `data` together with `entry_edits` is refused.
+
+`kanka_posts` takes the same `entry_edits`, `nbsp_delta` and `expect_updated_at` on `action: "update"`, applied to the live post; the post's current name is sent with it. Relations, attributes and entity tags do not take them.
+
+```jsonc
+{ "tool": "kanka_update_entity", "args": {
+    "campaign_id": 126725, "entity_type": "location", "id": 1982871,
+    "data": {},
+    "entry_edits": [{ "before": "freed Virion's apprentice [entity:8824970|Leonardo]",
+                      "after": "freed Virion's apprentice [entity:3171381|Leonardo]" }],
+    "expect_updated_at": "2026-09-24T15:14:23.000000Z" } }
+// → { "type": "location", "data": { ...slim... },
+//      "entry_edits": { "applied": 1, "changed": true, "nbsp": { "before": 0, "after": 0 },
+//                       "length": { "before": 2210, "after": 2210 }, "live_updated_at": "..." } }
 ```
 
 ### Incremental sync
