@@ -41,6 +41,50 @@ export interface SearchResult {
   [key: string]: unknown;
 }
 
+/** Collections that hang off a global entity_id: `campaigns/{c}/entities/{entity_id}/{sub}`. */
+export type EntitySubResource = "posts" | "relations" | "attributes" | "entity_tags";
+
+/** One slot of `entities/{entity_id}/image`. Fields are null when the slot is empty. */
+export interface EntityImageSlot {
+  uuid?: string | null;
+  full?: string | null;
+  thumbnail?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * `null` means Kanka reported the slot as empty. `undefined` means the response did not
+ * carry the slot as an object or explicit null, so its state is unknown.
+ */
+export interface EntityImage {
+  image: EntityImageSlot | null | undefined;
+  header: EntityImageSlot | null | undefined;
+}
+
+export interface EntityImageUpload {
+  bytes: Uint8Array;
+  filename: string;
+  mimeType: string;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Accept both the documented bare shape and a `{ data: ... }` envelope. */
+function toEntityImage(raw: unknown): EntityImage {
+  let body: Record<string, unknown> = isRecord(raw) ? raw : {};
+  if (!("image" in body) && !("header" in body) && isRecord(body.data)) {
+    body = body.data;
+  }
+  const slot = (key: "image" | "header"): EntityImageSlot | null | undefined => {
+    if (!(key in body)) return undefined;
+    const v = body[key];
+    if (v === null) return null;
+    return isRecord(v) ? (v as EntityImageSlot) : undefined;
+  };
+  return { image: slot("image"), header: slot("header") };
+}
+
 export interface ListEntitiesParams {
   campaignId: number;
   type?: EntityType;
@@ -148,7 +192,7 @@ export class KankaClient {
   listSubResource<T>(
     campaignId: number,
     entityId: number,
-    sub: "posts" | "relations",
+    sub: EntitySubResource,
     page = 1,
   ): Promise<KankaListResponse<T>> {
     return this.http.request<KankaListResponse<T>>({
@@ -160,7 +204,7 @@ export class KankaClient {
   getSubResource<T>(
     campaignId: number,
     entityId: number,
-    sub: "posts" | "relations",
+    sub: EntitySubResource,
     id: number,
   ): Promise<KankaSingleResponse<T>> {
     return this.http.request<KankaSingleResponse<T>>({
@@ -171,7 +215,7 @@ export class KankaClient {
   createSubResource<T>(
     campaignId: number,
     entityId: number,
-    sub: "posts" | "relations",
+    sub: EntitySubResource,
     data: Record<string, unknown>,
   ): Promise<KankaSingleResponse<T>> {
     return this.http.request<KankaSingleResponse<T>>({
@@ -184,7 +228,7 @@ export class KankaClient {
   updateSubResource<T>(
     campaignId: number,
     entityId: number,
-    sub: "posts" | "relations",
+    sub: EntitySubResource,
     id: number,
     data: Record<string, unknown>,
   ): Promise<KankaSingleResponse<T>> {
@@ -198,12 +242,110 @@ export class KankaClient {
   deleteSubResource(
     campaignId: number,
     entityId: number,
-    sub: "posts" | "relations",
+    sub: EntitySubResource,
     id: number,
   ): Promise<void> {
     return this.http.request<void>({
       method: "DELETE",
       path: `campaigns/${campaignId}/entities/${entityId}/${sub}/${id}`,
     });
+  }
+
+  // Entity image: campaigns/{c}/entities/{entity_id}/image. `entityId` is the global entity_id.
+
+  async getEntityImage(campaignId: number, entityId: number): Promise<EntityImage> {
+    return toEntityImage(await this.http.request<unknown>({ path: this.imagePath(campaignId, entityId) }));
+  }
+
+  async uploadEntityImage(
+    campaignId: number,
+    entityId: number,
+    file: EntityImageUpload,
+    isHeader?: boolean,
+  ): Promise<EntityImage> {
+    const form = new FormData();
+    form.append("file", new Blob([file.bytes], { type: file.mimeType }), file.filename);
+    if (isHeader !== undefined) form.append("is_header", isHeader ? "1" : "0");
+    return toEntityImage(
+      await this.http.request<unknown>({
+        method: "POST",
+        path: this.imagePath(campaignId, entityId),
+        formData: form,
+      }),
+    );
+  }
+
+  async deleteEntityImage(campaignId: number, entityId: number, isHeader?: boolean): Promise<EntityImage> {
+    return toEntityImage(
+      await this.http.request<unknown>({
+        method: "DELETE",
+        path: this.imagePath(campaignId, entityId),
+        query: isHeader ? { is_header: 1 } : undefined,
+      }),
+    );
+  }
+
+  private imagePath(campaignId: number, entityId: number): string {
+    return `campaigns/${campaignId}/entities/${entityId}/image`;
+  }
+
+  // Organisation memberships: campaigns/{c}/organisations/{organisation_id}/organisation_members.
+  // `organisationId` is the type-scoped organisation id, not the entity_id.
+
+  listOrganisationMembers<T>(
+    campaignId: number,
+    organisationId: number,
+    page = 1,
+  ): Promise<KankaListResponse<T>> {
+    return this.http.request<KankaListResponse<T>>({
+      path: this.orgMembersPath(campaignId, organisationId),
+      query: { page },
+    });
+  }
+
+  getOrganisationMember<T>(
+    campaignId: number,
+    organisationId: number,
+    id: number,
+  ): Promise<KankaSingleResponse<T>> {
+    return this.http.request<KankaSingleResponse<T>>({
+      path: `${this.orgMembersPath(campaignId, organisationId)}/${id}`,
+    });
+  }
+
+  createOrganisationMember<T>(
+    campaignId: number,
+    organisationId: number,
+    data: Record<string, unknown>,
+  ): Promise<KankaSingleResponse<T>> {
+    return this.http.request<KankaSingleResponse<T>>({
+      method: "POST",
+      path: this.orgMembersPath(campaignId, organisationId),
+      body: data,
+    });
+  }
+
+  updateOrganisationMember<T>(
+    campaignId: number,
+    organisationId: number,
+    id: number,
+    data: Record<string, unknown>,
+  ): Promise<KankaSingleResponse<T>> {
+    return this.http.request<KankaSingleResponse<T>>({
+      method: "PATCH",
+      path: `${this.orgMembersPath(campaignId, organisationId)}/${id}`,
+      body: data,
+    });
+  }
+
+  deleteOrganisationMember(campaignId: number, organisationId: number, id: number): Promise<void> {
+    return this.http.request<void>({
+      method: "DELETE",
+      path: `${this.orgMembersPath(campaignId, organisationId)}/${id}`,
+    });
+  }
+
+  private orgMembersPath(campaignId: number, organisationId: number): string {
+    return `campaigns/${campaignId}/organisations/${organisationId}/organisation_members`;
   }
 }

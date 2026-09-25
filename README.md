@@ -2,7 +2,7 @@
 
 A Model Context Protocol (MCP) server for [Kanka](https://kanka.io), the worldbuilding platform. Exposes a small set of tools that let any MCP-compatible agent (Claude Desktop, Claude Code, Cursor, custom clients) authenticate to a Kanka account and work with campaigns, entities, and search.
 
-> **Status:** Phase 4 — feature-complete. 15 tools, full CRUD over all 18 entity types, posts and relations sub-resources, OAuth 2.0 (Authorization Code + PKCE) with transparent refresh, and a client-side full-text search. Backed by a vitest test suite (43 tests across 7 files, including msw-mocked HTTP integration tests).
+> **Status:** Phase 4 — feature-complete. 19 tools, full CRUD over all 18 entity types, posts, relations, attributes, entity tags, organisation memberships and entity images, slim responses for bulk editing, OAuth 2.0 (Authorization Code + PKCE) with transparent refresh, and a client-side full-text search. Backed by a vitest test suite (msw-mocked HTTP integration tests plus tool-level tests over an in-memory MCP transport).
 
 ## Quickstart (recommended)
 
@@ -139,7 +139,7 @@ Expected output (abridged):
 → initialize
   kanka-mcp v0.1.0
 → tools/list
-  15 tools registered
+  19 tools registered
 → kanka_auth_status
    { authenticated: true, source: 'env' }
 → kanka_list_campaigns
@@ -224,6 +224,8 @@ All configuration is via environment variables.
 | `KANKA_REQUEST_TIMEOUT_MS` | no | `30000` | Per-request HTTP timeout; aborts the fetch and returns `NETWORK_ERROR` |
 | `KANKA_MAX_RESPONSE_BYTES` | no | `10485760` (10 MiB) | Hard cap on response body size; oversized responses are rejected |
 | `KANKA_LOG_LEVEL` | no | `info` | `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
+| `KANKA_UPLOAD_ROOTS` | for image upload | unset | Directories `kanka_entity_image` may read from, separated by `:` (`;` on Windows). When unset, `~/.config/kanka-mcp/upload-roots` is used. See [Image upload roots](#image-upload-roots) |
+| `KANKA_UPLOAD_MAX_BYTES` | no | `10485760` (10 MiB) | Largest file `kanka_entity_image` will upload. Clamped to 50 MiB |
 
 The server logs to **stderr** (stdout is reserved for MCP frames).
 
@@ -292,6 +294,77 @@ Tokens are stored as a JSON file with restrictive permissions; we deliberately a
 |---|---|
 | `kanka_posts` | List/read/create/update/delete posts (sub-notes) attached to an entity |
 | `kanka_relations` | List/read/create/update/delete typed links between entities (with attitude, two_way, etc.) |
+| `kanka_attributes` | List/read/create/update/delete attributes (Kanka "properties") on an entity |
+| `kanka_entity_tags` | Add or remove one tag on an entity without rewriting its whole `tags` array |
+
+**Organisation memberships**
+
+| Tool | Purpose |
+|---|---|
+| `kanka_organisation_members` | List/read/add/update/remove the members of an organisation. Takes the type-scoped `organisation_id` or the organisation's global `entity_id`. `delete` requires `confirm: true` |
+
+To move a member from organisation A to B, `create` the membership on B and then `delete` it from A (`confirm: true`). `update` with `data.organisation_id: B` asks Kanka to re-point the membership in place.
+
+```jsonc
+{ "tool": "kanka_organisation_members", "args": {
+    "campaign_id": 126725, "entity_id": 3045324, "action": "create",
+    "data": { "character_id": 11, "role": "Founder", "status_id": 0 } } }
+```
+
+**Entity images**
+
+| Tool | Purpose |
+|---|---|
+| `kanka_entity_image` | Read, upload, or remove an entity's image or header image. Takes the global `entity_id`. `upload` reads a local file from an allowlisted directory; `remove` requires `confirm: true` |
+
+Input:
+
+| Field | Type | Notes |
+|---|---|---|
+| `campaign_id` | positive int | |
+| `entity_id` | positive int | Global `entity_id`, not the type-scoped id |
+| `action` | `"get"` \| `"upload"` \| `"remove"` | |
+| `file_path` | string | `upload` only. Absolute path inside an upload root |
+| `is_header` | boolean | Target the header image instead of the main image |
+| `replace` | boolean, default `false` | `upload` only. Overwrite an image that is already set |
+| `confirm` | `true` | Required for `remove` |
+
+`upload` checks the file locally before any API call, then reads the current image. If the target slot already holds an image and `replace` is not `true`, the call fails with `UPLOAD_REFUSED` and returns the existing image URL, so legacy art is never overwritten by accident. If Kanka's response does not show the slot as an object or `null`, the state counts as unknown and the upload is refused unless `replace` is `true`. The tool is annotated `destructiveHint: true`. Kanka's create and update endpoints only take a gallery uuid (`entity_image_uuid`), so this tool is the way to attach a local file.
+
+```jsonc
+{ "tool": "kanka_entity_image", "args": {
+    "campaign_id": 126725, "entity_id": 3090387, "action": "upload",
+    "file_path": "/Users/me/art/creatures/gloop.png" } }
+```
+
+### Image upload roots
+
+`kanka_entity_image` reads a file only when its real path, after resolving symlinks, sits inside a configured root. With no roots configured, every upload is refused.
+
+Set roots with either:
+
+- `KANKA_UPLOAD_ROOTS`: absolute directories separated by the platform path delimiter. Read at startup.
+- `~/.config/kanka-mcp/upload-roots`: one absolute directory per line. Blank lines and lines starting with `#` are ignored. Read on every call, so edits apply without a restart. Used only when `KANKA_UPLOAD_ROOTS` is unset or empty.
+
+```text
+# ~/.config/kanka-mcp/upload-roots
+/Users/me/art/galactic-game
+```
+
+The file must also:
+
+- have a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp` extension that matches its magic bytes
+- be a regular, non-empty file no larger than `KANKA_UPLOAD_MAX_BYTES`
+
+Roots are compared by path segment, so `/art/rootX` is not inside root `/art/root`. A symlink inside a root that points outside it is refused, and so is a file with more than one hard link.
+
+Root rules:
+
+- A root may not be `/`, your home directory, `~/.config/kanka-mcp`, or any directory that contains `~/.config/kanka-mcp`. Such roots are skipped, and if none remain every upload is refused.
+- Files under `~/.config/kanka-mcp` (token, OAuth tokens, the roots file) are never read, whatever the roots say.
+- A path outside the roots, a missing file and an unreadable file all get the same refusal, so the tool cannot be used to probe which files exist.
+
+The roots file is the scope boundary for local file reads. Keep it writable only by you, and do not put it, or `~/.config/kanka-mcp`, inside a directory an agent can write to.
 
 ### Workflow
 
@@ -300,6 +373,34 @@ Call `kanka_describe_entity_type` first whenever you're about to send a `data` p
 - `calendar`: requires `weekday` (array of at least 2 strings)
 - `conversation`: requires `target_id` (1 = users, 2 = characters)
 - `dice_roll`: requires `parameters` (e.g. `"1d20+3"`)
+
+### Clearing fields and dropped keys
+
+On `kanka_update_entity`, send JSON null to clear a parent or a status: `{"parent_id": null}` (the legacy `<type>_id` parent field also accepts null) or `{"status_id": null}`. Create still requires numbers.
+
+Keys the type's schema does not declare are stripped before the request goes out. `kanka_create_entity` and `kanka_update_entity` list them in `ignored_fields`, so a field Kanka would have needed is never lost without notice. Call `kanka_describe_entity_type` to see what each type accepts.
+
+### Slim responses
+
+Every write echoes the whole record back by default, including `entry` and the rendered `entry_parsed`. For bulk edits that is most of the token cost. `kanka_get_entity`, `kanka_list_entities`, `kanka_create_entity`, `kanka_update_entity` and `kanka_posts` accept:
+
+- `response`: `"full"` (default, unchanged) or `"slim"`.
+- `fields`: with `"slim"`, extra top-level keys to copy from the record, such as `["entry"]` or `["entry", "tags"]`.
+
+A slim entity carries `id`, `entity_id`, `name`, `type` (the free-text Type field), `is_private`, `updated_at` and, for types that nest (location, family, organisation, item, note, event, creature, race, quest, map, journal, ability, tag, timeline), `parent_id`. `parent_id` comes from Kanka's `parent_id`, or from the older `<type>_id` field on records that still use it, and is `null` at the root. Rows from the untyped `/entities` list also keep `entity_type` and `child_id`. A slim post keeps `id`, `entity_id`, `name`, `visibility_id`, `is_pinned`, `position` and `updated_at`.
+
+```jsonc
+// Write a new body and get back only the summary
+{ "tool": "kanka_update_entity", "args": {
+    "campaign_id": 126725, "entity_type": "race", "id": 290352,
+    "data": { "entry": "<p>...</p>" }, "response": "slim" } }
+// → { "type": "race", "data": { "id": 290352, "entity_id": 3100560, "name": "Icebourne",
+//      "type": "Elemental Kin", "is_private": false, "updated_at": "...", "parent_id": null } }
+
+// Read the raw entry for editing, without entry_parsed or image URLs
+{ "tool": "kanka_get_entity", "args": {
+    "campaign_id": 126725, "entity_id": 3100560, "response": "slim", "fields": ["entry"] } }
+```
 
 ### Incremental sync
 
@@ -322,13 +423,15 @@ Backed by Kanka's native `?lastSync=` query parameter — efficient for long-run
 
 ### Supported entity types (18)
 
-`character`, `location`, `family`, `organisation`, `object`, `note`, `event`, `calendar`, `creature`, `race`, `quest`, `map`, `journal`, `ability`, `tag`, `conversation`, `dice_roll`, `timeline`
+`character`, `location`, `family`, `organisation`, `item`, `note`, `event`, `calendar`, `creature`, `race`, `quest`, `map`, `journal`, `ability`, `tag`, `conversation`, `dice_roll`, `timeline`
+
+Type names match Kanka's module codes, so the `type` a search result or `/entities` row reports can be passed straight back. `object` is still accepted as an alias for `item` (both address `/items`); responses always say `item`.
 
 ## Architecture
 
 ```
 MCP Client  <—stdio JSON-RPC—>  kanka-mcp (Node)
-                                  ├─ Tool layer (15 tools)
+                                  ├─ Tool layer (19 tools)
                                   ├─ Service layer (id-resolver, full-text-search, html strip)
                                   ├─ Kanka HTTP client (token-bucket rate limiter, retry, error map)
                                   └─ Auth (composite: OAuth → env token → file token)
@@ -390,7 +493,10 @@ Tests live next to the code they cover (`*.test.ts`). The `tsconfig.json` exclud
 | `src/client/pagination.test.ts` | Cursor encode/decode, `paginateAll` generator |
 | `src/client/http.test.ts` | msw-mocked HTTP: query encoding, 401 + refresh hook, 422 fields, 429 retry, 204 |
 | `src/services/html.test.ts` | HTML strip + snippet extraction |
-| `src/services/id-resolver.test.ts` | Cache hit/miss, `forget()`, unknown-type rejection |
+| `src/services/id-resolver.test.ts` | Cache hit/miss, `forget()`, unknown-type rejection, `entity_type` over free-text `type`, `object` alias |
+| `src/tools/tools.test.ts` | Tool handlers over an in-memory MCP transport with msw: item routing and the `object` alias, slim responses, organisation members, attributes, entity tags, delete confirmation, rate limiter and 422 paths |
+| `src/services/upload-policy.test.ts` | Upload roots from env and file, magic-byte sniffing, allowlist accept, outside-root, `..`, symlink and prefix-sibling refusal, one message for missing, unreadable and outside paths, FIFO, hard link, open flags, swap races, root and protected-path rules, size cap and its 50 MiB clamp |
+| `src/tools/entity-image.test.ts` | `kanka_entity_image` over the in-memory transport: multipart `file` field, `is_header`, the overwrite guard failing closed and `replace`, the `remove` confirm gate, the destructive annotation, call logging |
 | `src/schemas/index.test.ts` | Required-field enforcement per type, `describeEntityType` JSON Schema output |
 
 ## Continuous integration
@@ -429,6 +535,8 @@ Hardening defaults baked into the server:
 - **Token files** — written with `0600` mode under `~/.config/kanka-mcp/` (created `0700`).
 - **OAuth** — Authorization Code + PKCE (S256), 24-byte random `state` compared via `crypto.timingSafeEqual`, loopback callback bound to 127.0.0.1.
 - **Log redaction** — pino is configured to censor `Authorization` headers and any field named `*token*`, `*secret*`, etc., before writing to stderr.
+- **Tool-call log** — every tool call that reaches a handler writes one `tool call` line to stderr with the tool name, `campaign_id`, `entity_type`, `id`, `entity_id`, `organisation_id`, `action`, `response`, the outcome, the error code and `duration_ms`. Payloads (`data`, entry text, search queries, upload file paths and file bytes) and credentials are never logged. Calls the MCP SDK rejects during input validation never reach a handler and are not logged.
+- **Image upload allowlist**: `kanka_entity_image` reads only image files whose resolved path is inside a configured upload root, checks magic bytes and size, and refuses to overwrite an existing image unless `replace: true`. See [Image upload roots](#image-upload-roots).
 - **Stdout pollution guard** — ESLint bans `console.*` in `src/` so a future contributor can't accidentally corrupt MCP framing.
 - **CI audit** — `npm audit --omit=dev --audit-level=high` runs on every push/PR; the workflow fails on high-severity advisories in production deps.
 

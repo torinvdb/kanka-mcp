@@ -71,4 +71,22 @@ describe("schema registry", () => {
     expect(create.required).toContain("name");
     expect(Object.keys(create.properties ?? {})).toContain("title");
   });
+
+  it("tree types accept `parent_id`, the field Kanka reads for the parent", () => {
+    const treeTypes = [
+      "race", "creature", "family", "organisation", "location", "note", "journal",
+      "quest", "object", "map", "tag", "ability", "event", "timeline",
+    ] as const;
+    for (const t of treeTypes) {
+      const parsed = getUpdateSchema(t).safeParse({ parent_id: 42 });
+      expect(parsed.success, t).toBe(true);
+      if (parsed.success) expect(parsed.data, t).toHaveProperty("parent_id", 42);
+    }
+  });
+
+  it("family accepts a `locations` array", () => {
+    const parsed = getUpdateSchema("family").safeParse({ locations: [1, 2] });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toHaveProperty("locations", [1, 2]);
+  });
 });

@@ -6,6 +6,8 @@ export type KankaErrorCode =
   | "RATE_LIMITED"
   | "SERVER_ERROR"
   | "NETWORK_ERROR"
+  /** A local policy check (upload allowlist, file type, size, overwrite guard) refused the call. */
+  | "UPLOAD_REFUSED"
   | "UNKNOWN";
 
 export class KankaError extends Error {

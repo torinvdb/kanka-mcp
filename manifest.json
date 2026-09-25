@@ -4,7 +4,7 @@
   "display_name": "Kanka",
   "version": "0.1.0",
   "description": "Manage Kanka campaigns, characters, locations, posts, relations, and full-text search from any MCP client.",
-  "long_description": "MCP server for the Kanka worldbuilding API. 15 tools spanning auth, campaigns, search (native name + client-side full-text), and full CRUD on all 18 entity types. Includes a token-bucket rate limiter that auto-tunes from /profile, OAuth 2.0 + PKCE with refresh, structured 422 validation errors, and dual-ID resolution.",
+  "long_description": "MCP server for the Kanka worldbuilding API. 19 tools spanning auth, campaigns, search (native name + client-side full-text), full CRUD on all 18 entity types, posts, relations, attributes, entity tags, organisation memberships and entity images, with optional slim responses for bulk editing. Includes a token-bucket rate limiter that auto-tunes from /profile, OAuth 2.0 + PKCE with refresh, structured 422 validation errors, and dual-ID resolution.",
   "author": {
     "name": "Torin van den Bulk",
     "url": "https://github.com/torinvdb"
@@ -99,6 +99,10 @@
     { "name": "kanka_update_entity", "description": "Partial PATCH on an existing entity" },
     { "name": "kanka_delete_entity", "description": "Delete an entity (requires confirm)" },
     { "name": "kanka_posts", "description": "CRUD on posts attached to an entity" },
-    { "name": "kanka_relations", "description": "CRUD on relations between entities" }
+    { "name": "kanka_relations", "description": "CRUD on relations between entities" },
+    { "name": "kanka_attributes", "description": "CRUD on attributes (properties) of an entity" },
+    { "name": "kanka_entity_tags", "description": "Add or remove single tags on an entity" },
+    { "name": "kanka_organisation_members", "description": "CRUD on organisation memberships (delete requires confirm)" },
+    { "name": "kanka_entity_image", "description": "Get, upload from an allowlisted local file, or remove an entity image (remove requires confirm)" }
   ]
 }

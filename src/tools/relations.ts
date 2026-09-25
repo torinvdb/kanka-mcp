@@ -25,5 +25,8 @@ export function registerRelationsTool(server: McpServer, ctx: ToolContext): void
       "List, read, create, update, or delete relations between entities. Relations hang off the GLOBAL entity_id of the source. The `target_id` in `data` is the global entity_id of the destination. Set `two_way: true` to create reciprocal relations.",
     sub: "relations",
     schema: RelationInputSchema,
+    slimKeys: ["id", "owner_id", "target_id", "relation", "attitude", "visibility_id", "is_pinned", "updated_at"],
+    // Kanka requires owner_id on create; it is always the entity in the path.
+    createFromPath: (entityId) => ({ owner_id: entityId }),
   });
 }

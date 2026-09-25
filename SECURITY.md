@@ -30,6 +30,7 @@ This project is a **stdio MCP server** that an LLM agent invokes locally to talk
 | T7 | Logs leaking tokens or `Authorization` headers | Pino `redact` config scrubs known credential fields before writing to stderr |
 | T8 | Stdout pollution corrupting MCP framing | `no-console` ESLint rule enforced in `src/`; all logging goes to stderr via pino |
 | T9 | Supply chain (vulnerable transitive deps) | `npm audit` step in CI; renovate/dependabot recommended for downstream users |
+| T10 | Model-directed local file read: `kanka_entity_image` takes a file path from the agent, which may carry an injected instruction to upload a secret or probe the filesystem | Reads only under operator roots from `KANKA_UPLOAD_ROOTS` or `~/.config/kanka-mcp/upload-roots`; no roots means no uploads. Roots of `/`, the home directory, or `~/.config/kanka-mcp` and its ancestors are rejected, and files under `~/.config/kanka-mcp` are always denied. The path is checked lexically before any filesystem call, then by realpath and path segment, so symlink escapes and `/a/rootX` for root `/a/root` fail. Outside, missing and unreadable paths share one refusal message. Non-regular files (FIFOs, devices) are refused before `open`, which uses `O_NOFOLLOW` and `O_NONBLOCK`. After `open` the file must have one hard link and the re-resolved path must match the descriptor's device and inode. Only PNG, JPEG, GIF and WebP pass, by extension and magic bytes, up to `KANKA_UPLOAD_MAX_BYTES` (default 10 MiB, clamped to 50 MiB). An existing image is not overwritten without `replace: true`, and an unreadable image state counts as existing. Paths and file bytes are never logged |
 
 The threats this project does **not** defend against:
 
@@ -37,10 +38,13 @@ The threats this project does **not** defend against:
 - An attacker with code execution on the user's machine. They can read the same files our process can.
 - A hostile MCP client that the user voluntarily installs. The agent ↔ server boundary trusts the agent.
 
+The upload roots file (`~/.config/kanka-mcp/upload-roots`) is the scope boundary for T10. It is read on every call so the owner can edit it without a restart, which also means anything that can write to it can widen what the agent may read. Keep it owned by you and out of any directory an agent can write to.
+
 ## Hardened defaults
 
 - `KANKA_REQUEST_TIMEOUT_MS=30000` — caps any single HTTP request
 - `KANKA_MAX_RESPONSE_BYTES=10485760` — 10 MiB response cap
+- `KANKA_UPLOAD_MAX_BYTES=10485760`: 10 MiB upload cap, clamped to 50 MiB; no upload roots configured by default
 - `KANKA_RATE_LIMIT_PER_MIN=25` (free) / `80` (subscriber) — protects against runaway loops burning quota or triggering 429s
 - All tokens stored at `0600` perms, parent directory `0700`
 - OAuth callback server binds to `127.0.0.1` only, redirect advertised as `localhost` (Kanka rejects raw IPs)

@@ -46,7 +46,7 @@ export function buildServer(): BuildServerResult {
     {
       capabilities: { tools: {} },
       instructions:
-        "Kanka MCP server. Authenticate via the KANKA_TOKEN env var (Personal API token from app.kanka.io/settings/api). Call kanka_list_campaigns to discover available campaigns, then operate on entities scoped to a chosen campaign_id. For unfamiliar entity types, call kanka_describe_entity_type before constructing create/update payloads.",
+        "Kanka MCP server. Authenticate via the KANKA_TOKEN env var (Personal API token from app.kanka.io/settings/api). Call kanka_list_campaigns to discover available campaigns, then operate on entities scoped to a chosen campaign_id. For unfamiliar entity types, call kanka_describe_entity_type before constructing create/update payloads. Pass response: \"slim\" on get/list/create/update when you do not need the entry HTML echoed back.",
     },
   );
 

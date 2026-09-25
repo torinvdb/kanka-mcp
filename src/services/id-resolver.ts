@@ -1,5 +1,5 @@
 import type { KankaClient } from "../client/client.js";
-import { isEntityType, type EntityType } from "../schemas/entity-types.js";
+import { normalizeEntityType, type EntityType } from "../schemas/entity-types.js";
 
 export interface ResolvedEntity {
   campaignId: number;
@@ -9,6 +9,11 @@ export interface ResolvedEntity {
   name?: string;
 }
 
+/** Ids end up in URL paths, so only positive integers are ever cached or returned. */
+export function isPositiveInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 export class IdResolver {
   private readonly cache = new Map<string, ResolvedEntity>();
   private readonly maxSize = 1000;
@@ -16,6 +21,8 @@ export class IdResolver {
   constructor(private readonly client: KankaClient) {}
 
   remember(entry: ResolvedEntity): void {
+    // Callers feed this from API responses (untrusted); a malformed id must never reach a path.
+    if (!isPositiveInt(entry.entityId) || !isPositiveInt(entry.typeId)) return;
     if (this.cache.size >= this.maxSize) {
       const first = this.cache.keys().next().value;
       if (first !== undefined) this.cache.delete(first);
@@ -32,19 +39,32 @@ export class IdResolver {
     if (cached) return cached;
 
     const response = await this.client.getEntityByEntityId(campaignId, entityId);
-    const data = response.data as { type?: string; child_id?: number; id?: number; name?: string };
-    const typeRaw = data.type;
-    if (!typeRaw || !isEntityType(typeRaw)) {
-      throw new Error(`Unsupported or unknown entity type for entity_id ${entityId}: ${typeRaw}`);
+    const data = response.data as {
+      entity_type?: unknown;
+      type?: unknown;
+      child_id?: unknown;
+      id?: unknown;
+      name?: string;
+    };
+    // Kanka reports the module code in `entity_type` ("item", "race"); `type` is the
+    // user's free-text Type field ("Weapon"). Some responses omit `entity_type` and carry
+    // the module code in `type`; only then is `type` consulted.
+    const type =
+      data.entity_type === undefined
+        ? normalizeEntityType(data.type)
+        : normalizeEntityType(data.entity_type);
+    if (!type) {
+      const reported = String(data.entity_type ?? data.type);
+      throw new Error(`Unsupported or unknown entity type for entity_id ${entityId}: ${reported}`);
     }
     const typeId = data.child_id ?? data.id;
-    if (!typeId) {
+    if (!isPositiveInt(typeId)) {
       throw new Error(`Could not determine type-scoped id for entity_id ${entityId}`);
     }
     const resolved: ResolvedEntity = {
       campaignId,
       entityId,
-      type: typeRaw,
+      type,
       typeId,
       name: data.name,
     };

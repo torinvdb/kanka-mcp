@@ -196,4 +196,53 @@ describe("HttpClient", () => {
     });
     expect(result).toBeUndefined();
   });
+
+  describe("multipart form bodies", () => {
+    function form(): FormData {
+      const fd = new FormData();
+      fd.append("file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }), "a.png");
+      return fd;
+    }
+
+    it("lets fetch set the multipart boundary, keeps auth, and goes through the limiter", async () => {
+      let contentType: string | null = null;
+      let authorization: string | null = null;
+      let fileName: string | undefined;
+      server.use(
+        http.post(`${BASE}/campaigns/1/entities/2/image`, async ({ request }) => {
+          contentType = request.headers.get("content-type");
+          authorization = request.headers.get("authorization");
+          const f = (await request.formData()).get("file");
+          fileName = f instanceof File ? f.name : undefined;
+          return HttpResponse.json({ image: { uuid: "u" } });
+        }),
+      );
+      const limiter = new RateLimiter({ perMinute: 60_000, burstMax: 100 });
+      const acquire = vi.spyOn(limiter, "acquire");
+      const client = new HttpClient(BASE, makeAuth("form-token"), limiter);
+      const result = await client.request<{ image: { uuid: string } }>({
+        method: "POST",
+        path: "campaigns/1/entities/2/image",
+        formData: form(),
+      });
+      expect(result.image.uuid).toBe("u");
+      expect(contentType).toMatch(/^multipart\/form-data; boundary=/);
+      expect(contentType).not.toContain("application/json");
+      expect(authorization).toBe("Bearer form-token");
+      expect(fileName).toBe("a.png");
+      expect(acquire).toHaveBeenCalledTimes(1);
+    });
+
+    it("maps errors on a multipart request", async () => {
+      server.use(
+        http.post(`${BASE}/campaigns/1/entities/2/image`, () =>
+          HttpResponse.json({ message: "nope" }, { status: 403 }),
+        ),
+      );
+      const client = makeClient(makeAuth("t"));
+      await expect(
+        client.request({ method: "POST", path: "campaigns/1/entities/2/image", formData: form() }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+  });
 });

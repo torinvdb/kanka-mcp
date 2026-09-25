@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { ENTITY_TYPES } from "../schemas/index.js";
+import { ENTITY_TYPE_INPUTS, normalizeEntityType, type EntityType } from "../schemas/index.js";
 import { fullTextSearch } from "../services/full-text-search.js";
+import { isPositiveInt } from "../services/id-resolver.js";
 import type { ToolContext } from "./context.js";
 import { jsonResult, safeRun } from "./result.js";
 
@@ -16,7 +17,7 @@ export function registerSearchTools(server: McpServer, ctx: ToolContext): void {
       inputSchema: {
         campaign_id: z.number().int().positive(),
         query: z.string().min(1),
-        types: z.array(z.enum(ENTITY_TYPES)).optional(),
+        types: z.array(z.enum(ENTITY_TYPE_INPUTS)).optional(),
         page: z.number().int().positive().optional(),
       },
     },
@@ -25,14 +26,17 @@ export function registerSearchTools(server: McpServer, ctx: ToolContext): void {
         const response = await ctx.client.search(campaign_id, query, page ?? 1);
         let results = response.data;
         if (types && types.length > 0) {
-          const allowed = new Set(types);
-          results = results.filter((r) => allowed.has(r.type as (typeof types)[number]));
+          const allowed = new Set(types.map((t) => normalizeEntityType(t)));
+          results = results.filter((r) => allowed.has(normalizeEntityType(r.type)));
         }
         for (const r of results) {
+          // Only cache module codes this server can route; anything else would build a bad path later.
+          const type = normalizeEntityType(r.type);
+          if (!type || !isPositiveInt(r.id) || !isPositiveInt(r.entity_id)) continue;
           ctx.idResolver.remember({
             campaignId: campaign_id,
             entityId: r.entity_id,
-            type: r.type as (typeof ENTITY_TYPES)[number],
+            type,
             typeId: r.id,
             name: r.name,
           });
@@ -61,7 +65,7 @@ export function registerSearchTools(server: McpServer, ctx: ToolContext): void {
       inputSchema: {
         campaign_id: z.number().int().positive(),
         query: z.string().min(1),
-        types: z.array(z.enum(ENTITY_TYPES)).optional(),
+        types: z.array(z.enum(ENTITY_TYPE_INPUTS)).optional(),
         max_pages_per_type: z.number().int().positive().max(67).optional(),
         per_page: z.number().int().positive().max(100).optional(),
         limit: z.number().int().positive().max(200).optional(),
@@ -74,7 +78,7 @@ export function registerSearchTools(server: McpServer, ctx: ToolContext): void {
         const report = await fullTextSearch(ctx.client, {
           campaignId: campaign_id,
           query,
-          types,
+          types: types?.map((t) => normalizeEntityType(t)).filter((t): t is EntityType => !!t),
           maxPagesPerType: max_pages_per_type,
           perPage: per_page,
           limit,

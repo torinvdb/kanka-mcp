@@ -1,18 +1,25 @@
 import { z, ZodError } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import type { EntitySubResource } from "../client/client.js";
 import { KankaError } from "../client/errors.js";
 import type { ToolContext } from "./context.js";
 import { jsonResult, safeRun } from "./result.js";
-
-type SubResource = "posts" | "relations";
+import { fieldsInput, responseInput, slimRecord } from "./slim.js";
 
 interface SubResourceToolOptions {
   name: string;
   title: string;
   description: string;
-  sub: SubResource;
+  sub: EntitySubResource;
   schema: z.ZodTypeAny;
+  /** Keys kept when the caller passes `response: "slim"`. */
+  slimKeys: readonly string[];
+  /**
+   * Fields a create must carry that follow from the request path, not from the
+   * caller. Applied after validation, so caller data cannot override them.
+   */
+  createFromPath?: (entityId: number) => Record<string, unknown>;
 }
 
 export function registerSubResourceTool(
@@ -37,10 +44,14 @@ export function registerSubResourceTool(
         data: z.record(z.string(), z.unknown()).optional(),
         confirm: z.literal(true).optional(),
         page: z.number().int().positive().optional(),
+        response: responseInput,
+        fields: fieldsInput,
       },
     },
-    async ({ campaign_id, entity_id, action, id, data, confirm, page }) =>
+    async ({ campaign_id, entity_id, action, id, data, confirm, page, response: mode, fields }) =>
       safeRun(async () => {
+        const shape = (record: unknown): unknown =>
+          mode === "slim" ? slimRecord(record, opts.slimKeys, fields) : record;
         switch (action) {
           case "list": {
             const response = await ctx.client.listSubResource(
@@ -50,7 +61,7 @@ export function registerSubResourceTool(
               page ?? 1,
             );
             return jsonResult({
-              data: response.data,
+              data: response.data.map(shape),
               meta: response.meta,
               links: response.links,
             });
@@ -65,7 +76,7 @@ export function registerSubResourceTool(
               opts.sub,
               id,
             );
-            return jsonResult({ data: response.data });
+            return jsonResult({ data: shape(response.data) });
           }
           case "create": {
             if (!data) {
@@ -76,9 +87,9 @@ export function registerSubResourceTool(
               campaign_id,
               entity_id,
               opts.sub,
-              validated,
+              { ...validated, ...(opts.createFromPath?.(entity_id) ?? {}) },
             );
-            return jsonResult({ data: response.data });
+            return jsonResult({ data: shape(response.data) });
           }
           case "update": {
             if (id === undefined) {
@@ -87,11 +98,7 @@ export function registerSubResourceTool(
             if (!data) {
               throw new KankaError("VALIDATION_ERROR", "`data` is required for action='update'");
             }
-            const partial =
-              typeof (opts.schema as { partial?: unknown }).partial === "function"
-                ? (opts.schema as unknown as { partial: () => z.ZodTypeAny }).partial()
-                : opts.schema;
-            const validated = validateOrThrow(partial, data);
+            const validated = validateOrThrow(partialOf(opts.schema), data);
             const response = await ctx.client.updateSubResource(
               campaign_id,
               entity_id,
@@ -99,7 +106,7 @@ export function registerSubResourceTool(
               id,
               validated,
             );
-            return jsonResult({ data: response.data });
+            return jsonResult({ data: shape(response.data) });
           }
           case "delete": {
             if (id === undefined) {
@@ -119,7 +126,7 @@ export function registerSubResourceTool(
   );
 }
 
-function validateOrThrow(schema: z.ZodTypeAny, data: unknown): Record<string, unknown> {
+export function validateOrThrow(schema: z.ZodTypeAny, data: unknown): Record<string, unknown> {
   try {
     return schema.parse(data) as Record<string, unknown>;
   } catch (err) {
@@ -136,4 +143,10 @@ function validateOrThrow(schema: z.ZodTypeAny, data: unknown): Record<string, un
     }
     throw err;
   }
+}
+
+export function partialOf(schema: z.ZodTypeAny): z.ZodTypeAny {
+  return typeof (schema as { partial?: unknown }).partial === "function"
+    ? (schema as unknown as { partial: () => z.ZodTypeAny }).partial()
+    : schema;
 }

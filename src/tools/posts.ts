@@ -18,8 +18,9 @@ export function registerPostsTool(server: McpServer, ctx: ToolContext): void {
     name: "kanka_posts",
     title: "Posts (entity notes)",
     description:
-      "List, read, create, update, or delete the posts (sub-notes) attached to an entity. Posts hang off the GLOBAL entity_id, not the type-scoped id. Provide `action` plus the relevant fields: list (page), get (id), create (data), update (id, data), delete (id, confirm: true).",
+      "List, read, create, update, or delete the posts (sub-notes) attached to an entity. Posts hang off the GLOBAL entity_id, not the type-scoped id. Provide `action` plus the relevant fields: list (page), get (id), create (data), update (id, data), delete (id, confirm: true). Pass `response: \"slim\"` to drop the post `entry` and `entry_parsed` from what comes back (id, entity_id, name, visibility_id, is_pinned, position, updated_at remain); add `fields: [\"entry\"]` to keep the entry.",
     sub: "posts",
     schema: PostInputSchema,
+    slimKeys: ["id", "entity_id", "name", "visibility_id", "is_pinned", "position", "updated_at"],
   });
 }

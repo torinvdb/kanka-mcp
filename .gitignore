@@ -10,3 +10,6 @@ coverage/
 
 # Built MCP bundle artifacts (ship via GitHub Releases, not committed)
 *.mcpb
+
+# graphify knowledge graph output
+graphify-out/

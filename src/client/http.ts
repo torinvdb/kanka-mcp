@@ -13,6 +13,8 @@ export interface HttpRequestOptions {
   path: string;
   query?: Record<string, string | number | boolean | undefined | null>;
   body?: unknown;
+  /** Multipart body. fetch sets the multipart Content-Type and boundary; takes precedence over `body`. */
+  formData?: FormData;
   signal?: AbortSignal;
 }
 
@@ -56,8 +58,10 @@ export class HttpClient {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       };
-      let body: string | undefined;
-      if (opts.body !== undefined) {
+      let body: string | FormData | undefined;
+      if (opts.formData !== undefined) {
+        body = opts.formData;
+      } else if (opts.body !== undefined) {
         headers["Content-Type"] = "application/json";
         body = JSON.stringify(opts.body);
       }

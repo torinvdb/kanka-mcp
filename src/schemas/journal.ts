@@ -3,6 +3,8 @@ import { z } from "zod";
 import { BaseEntityInputSchema } from "./common.js";
 
 export const JournalInputSchema = BaseEntityInputSchema.extend({
+  // Parent in the same tree. Kanka reads `parent_id`; the older `<type>_id` field is ignored.
+  parent_id: z.number().int().positive().optional(),
   journal_id: z.number().int().positive().optional(),
   author_id: z.number().int().positive().optional(),
   date: z.string().optional(),
